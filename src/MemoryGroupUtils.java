@@ -1,66 +1,131 @@
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
 
 public class MemoryGroupUtils {
 
-	private static Collection<Three> _groupBy(List<? extends Map<String, Object>> lists, String... field) {
-		Map<String, Three> rltMap = new HashMap<String, Three>();
-		for (Map map : lists) {
+	/**
+	 * 每个小的集合分组后的结果
+	 * 
+	 * @param lists
+	 * @param field
+	 * @return
+	 */
+
+	/**
+	 * 
+	 * @param lists
+	 *            每个小的集合
+	 * @param field
+	 *            带分组的属性
+	 * @return Map {"分组属性" ：{"分组属性",同一属性集合,"分组属性"}}
+	 */
+	private static Map<String, SubGroup<String, List, String>> _groupBy(List<? extends Map<String, Object>> lists,
+			boolean isSimple,
+			String... field) {
+		Map<String, SubGroup<String, List, String>> rltMap = new HashMap<String, SubGroup<String, List, String>>();
+		for (Map<String, Object> map : lists) {
 			StringBuilder groupByKey = new StringBuilder("");
 			for (String s : field) {
 				groupByKey.append(map.get(s));
 			}
-			Three<Object, List, Object> threed = rltMap.get(groupByKey.toString());
-			if (threed != null) {// 之前已经有重复的值了，直接放进去即可
-				threed.getS().add(map);
-				continue;
+			SubGroup<String, List, String> threed = rltMap.get(groupByKey.toString());
+			if(!isSimple){
+				if (threed != null) {// 之前已经有重复的值了，直接放进去即可
+//					threed.getS().add(map);
+					threed.getGroup().add(map);
+					continue;
+				}
 			}
 			// 之前没有重复的值，new一个出来
-			Three<Object, List, Object> three = new Three<Object, List, Object>(groupByKey, new LinkedList<>(),
-					new Object());
+			List<Map<String, Object>> list = new LinkedList<Map<String, Object>>();
+			list.add(map);
+			SubGroup<String, List, String> three = null;
+			if(isSimple){
+				three = new PairGroup <String, List, String>(groupByKey.toString(), null,
+						groupByKey.toString());
+			}else{
+				three = new ThreeGroup<String, List, String>(groupByKey.toString(), list,
+						groupByKey.toString());
+			}
 			rltMap.put(groupByKey.toString(), three);
 		}
-		return rltMap.values();
+		return rltMap;
 	}
 
-	public static List<Three> groupBy(List<Map<String, Object>> lists, final String... field) {
-		if (lists.size() > 100000) {
-			List<List<Map<String, Object>>> rlList = shareByFixedNum(lists, 5);
-			Master<List<Map<String, Object>>, Collection<Three>> master = new Master<List<Map<String, Object>>, Collection<Three>>(
-					new Worker<List<Map<String, Object>>, Collection<Three>>() {
-						public Collection<Three> handle(List<Map<String, Object>> input) {
-							Collection<Three> list = _groupBy(input, field);
-							return list;
-						}
-					}, 5);
-
-			for (List<Map<String, Object>> list : rlList) {
-				master.submitAndExe(list);
-			}
-			master.execute();
-			// 保存最终结算结果
-			Queue<Collection<Three>> resultMap = master.getResultQueue();
-
-			// 不需要等待所有Worker都执行完成，即可开始计算最终结果
-			while (resultMap.size() > 0 || !master.isComplete()) {
-				Collection<Three> col = resultMap.poll();
-				if(col != null){
-					for(Three three : col){
-						List li = (List)three.getS();
-						System.err.println(li.size());
+	/**
+	 *  简单分组、像数据库那样进行分组 ，结果中分组的无结果集
+	 */
+	public static List<SubGroup> simpleGroupBy(List<Map<String, Object>> lists, final String... field) {
+		return groupBy(lists, true, field);
+	}
+	
+	/**
+	 * 高级分组、像数据库那样进行分组 ，并且结果中的分组包含结果集
+	 * @param lists
+	 * @param field
+	 * @return
+	 */
+	public static List<SubGroup> seniorGroupBy(List<Map<String, Object>> lists, final String... field) {
+		return groupBy(lists, false, field);
+	}
+	
+	public static List<SubGroup> groupBy(List<Map<String, Object>> lists, final boolean isSimple, final String... field) {
+		// if (lists.size() > 100000) {
+		List<List<Map<String, Object>>> rlList = shareByFixedNum(lists, 5);
+		Master<List<Map<String, Object>>, Map<String, SubGroup<String, List, String>>> master = new Master<List<Map<String, Object>>, Map<String, SubGroup<String, List, String>>>(
+				new Worker<List<Map<String, Object>>, Map<String, SubGroup<String, List, String>>>() {
+					public Map<String, SubGroup<String, List, String>> handle(List<Map<String, Object>> input) {
+						Map<String, SubGroup<String, List, String>> list = _groupBy(input, isSimple, field);
+						return list;
 					}
+				}, 5);
+
+		for (List<Map<String, Object>> list : rlList) {
+			master.submitAndExe(list);
+		}
+		master.execute();
+		// 保存最终结算结果
+		Queue<Map<String, SubGroup<String, List, String>>> resultMap = master.getResultQueue();
+		// 不需要等待所有Worker都执行完成，即可开始计算最终结果
+
+		// List<Three> fianlRlt = new LinkedList<Three>();
+		Map<String, SubGroup<String, List, String>> fianlRlt = new LinkedHashMap<String, SubGroup<String, List, String>>();
+
+		while (resultMap.size() > 0 || !master.isComplete()) {
+			Map<String, SubGroup<String, List, String>> col = resultMap.poll(); // 每个小的集合分组后的结果
+			if (col != null) {
+				Set<String> keySet = col.keySet();
+				for (String string : keySet) {
+					SubGroup<String, List, String> three = col.get(string);
+					SubGroup<String, List, String> finalLi = fianlRlt.get(string);
+					if (finalLi != null) {
+						if(!isSimple){
+							finalLi.getGroup().addAll(three.getGroup());
+//							finalLi.getS().addAll(three.getS());
+						}
+						continue;
+					}
+					fianlRlt.put(string, three);
 				}
 			}
 		}
+		
+		Set<String> finalKeySet = fianlRlt.keySet(); 
+		for(String s : finalKeySet ){
+			System.err.println(fianlRlt.get(s).getGroup().size());
+		}
+		// }
 		return null;
 	}
 
-	public static List<Three> groupBy(List<? extends Map<String, IGroupAble>> lists) {
+	public static List<SubGroup> groupBy(List<? extends Map<String, IGroupAble>> lists) {
 		if (lists.size() > 100000) {
 
 		}
@@ -156,12 +221,14 @@ public class MemoryGroupUtils {
 		long start = System.currentTimeMillis();
 		List<Map<String, Object>> list = new LinkedList<Map<String, Object>>();
 		Long rlt = 0L;
-		for (int i = 1; i < 1000001; i++) {
+		for (int i = 1; i < 1000000; i++) {
 			Map<String, Object> map = new HashMap<String, Object>();
 			map.put("idx", i);
-			map.put("group", i % 7);
+			map.put("group", i % 5);
 			list.add(map);
 		}
-		MemoryGroupUtils.groupBy(list, "group");
+		System.err.println("遍历耗时：" + (System.currentTimeMillis() - start)/1000);
+		MemoryGroupUtils.groupBy(list, false,"group");
+		System.err.println("总共耗时："+ (System.currentTimeMillis() - start)/1000);
 	}
 }
