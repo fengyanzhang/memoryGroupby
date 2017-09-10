@@ -6,4 +6,11 @@ public interface IGroupAble {
 	 * @return
 	 */
 	public Object getGroupByValue();
+	
+	
+	/**
+	 * 获取要聚合的字段的值
+	 * @return
+	 */
+	public Object getConvergeFieldValue();
 }
